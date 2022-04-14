@@ -1,0 +1,13 @@
+2022/02/17 16:03:38 | Server listening on port: 8000
+2022/02/17 16:03:55 | Password Matched.
+2022/02/17 16:04:16 | claims:  map[exp:1.645089535e+09 iat:1.645088635e+09 iss:1 user_id:1]
+2022/02/17 16:36:20 | Server listening on port: 8000
+2022/02/17 16:36:30 | Password Matched.
+2022/02/17 16:36:47 | claims:  map[exp:1.64509149e+09 iat:1.64509059e+09 iss:1 user_id:1]
+2022/02/18 10:48:57 | Server listening on port: 8000
+2022/02/18 10:48:57 listen tcp 0.0.0.0:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+2022/02/18 13:03:40 | Server listening on port: 8000
+2022/02/18 13:14:58 | Server listening on port: 8000
+2022/02/18 13:14:58 listen tcp 0.0.0.0:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+2022/02/18 13:17:09 | Server listening on port: 8000
+2022/02/18 13:17:09 listen tcp 0.0.0.0:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
