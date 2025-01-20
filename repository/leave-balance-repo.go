@@ -1,11 +1,13 @@
 package repository
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
-	"log"
 
-	"github.com/dafiqarba/be-payroll/entity"
+	"github.com/dafiqarba/be-payroll/model"
+	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 )
 
@@ -13,48 +15,106 @@ import (
 
 type LeaveBalanceRepo interface {
 	//Read
-	GetLeaveBalance(id int, year string) (entity.LeaveBalance, error)
+	GetLeaveBalance(ctx context.Context, id uuid.UUID, year string) (model.LeaveBalance, error)
 	//Create
-	// InsertUser(user entity.User) (entity.User, error)
+	// InsertUser(user model.User) (model.User, error)
+	CreateLeaveBalance(ctx context.Context, tx *sqlx.Tx, leaveBalance model.LeaveBalance) (model.LeaveBalance, error)
 	//Update
-	UpdateLeaveBalance(updatedData entity.UpdateLeaveBalanceModel, leave_type string) (int, error)
+	UpdateLeaveBalance(ctx context.Context, tx *sqlx.Tx, updatedData model.UpdateLeaveBalanceModel, leave_type string) (int, error)
 	//Delete
 }
 
 type leaveBalanceConnection struct {
-	connection *sql.DB
+	connection *sqlx.DB
 }
 
-func NewLeaveBalanceRepo(dbConn *sql.DB) LeaveBalanceRepo {
+func NewLeaveBalanceRepo(dbConn *sqlx.DB) LeaveBalanceRepo {
 	return &leaveBalanceConnection{
 		connection: dbConn,
 	}
 }
 
-func (db *leaveBalanceConnection) GetLeaveBalance(id int, year string) (entity.LeaveBalance, error) {
+func (db *leaveBalanceConnection) GetLeaveBalance(ctx context.Context, id uuid.UUID, year string) (model.LeaveBalance, error) {
 	//Variable to store leave balance detail
-	var leaveBalance entity.LeaveBalance
-	//Execute SQL Query
-	row := db.connection.QueryRow(`SELECT * FROM leave_balance WHERE user_id=$1 AND balance_year=$2`, id, year)
-	err := row.Scan(&leaveBalance.Balance_id, &leaveBalance.Balance_year, &leaveBalance.Cuti_tahunan, &leaveBalance.Cuti_diambil, &leaveBalance.Cuti_balance, &leaveBalance.Cuti_izin, &leaveBalance.Cuti_sakit, &leaveBalance.User_id)
+	var (
+		leaveBalance model.LeaveBalance
+	)
 
-	//Err Handling
+	//Execute SQL Query
+	query := `SELECT * FROM leave_balance WHERE user_id=$1 AND leave_year=$2`
+	err := db.connection.QueryRowxContext(ctx, query, id, year).Scan(
+		&leaveBalance.Leave_id,
+		&leaveBalance.Leave_year,
+		&leaveBalance.Cuti_tahunan,
+		&leaveBalance.Cuti_diambil,
+		&leaveBalance.Cuti_balance,
+		&leaveBalance.Cuti_izin,
+		&leaveBalance.Cuti_sakit,
+		&leaveBalance.User_id,
+	)
+
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Println("| " + err.Error())
-			return leaveBalance, err
-		} else {
-			log.Println("| " + err.Error())
-			return leaveBalance, err
-		}
+		utils.LogError("Repo", "func GetLeaveBalance", err)
+		return leaveBalance, err
 	}
 
 	// returns populated data
 	return leaveBalance, err
 }
 
-func (db *leaveBalanceConnection) UpdateLeaveBalance(updatedData entity.UpdateLeaveBalanceModel, leave_type string) (int, error) {
-	var updatedColumn int
+func (db *leaveBalanceConnection) CreateLeaveBalance(ctx context.Context, tx *sqlx.Tx, leaveBalance model.LeaveBalance) (model.LeaveBalance, error) {
+	var (
+		leave model.LeaveBalance
+	)
+
+	query := `
+			INSERT INTO
+				leave_balance (leave_year, cuti_tahunan, cuti_diambil, cuti_balance, cuti_izin, cuti_sakit, user_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			RETURNING
+				leave_id,
+				leave_year,
+				cuti_tahunan,
+				cuti_diambil,
+				cuti_balance,
+				cuti_izin,
+				cuti_sakit,
+				user_id;
+		`
+
+	err := tx.QueryRowxContext(ctx, query,
+		leaveBalance.Leave_id,
+		leaveBalance.Leave_year,
+		leaveBalance.Cuti_tahunan,
+		leaveBalance.Cuti_diambil,
+		leaveBalance.Cuti_balance,
+		leaveBalance.Cuti_izin,
+		leaveBalance.Cuti_sakit,
+		leaveBalance.User_id,
+	).Scan(
+		&leave.Leave_id,
+		&leave.Leave_year,
+		&leave.Cuti_tahunan,
+		&leave.Cuti_diambil,
+		&leave.Cuti_balance,
+		&leave.Cuti_izin,
+		&leave.Cuti_sakit,
+		&leave.User_id,
+	)
+
+	if err != nil {
+		utils.LogError("Repo", "func CreateLeaveBalance", err)
+		return leave, err
+	}
+
+	return leave, err
+}
+
+func (db *leaveBalanceConnection) UpdateLeaveBalance(ctx context.Context, tx *sqlx.Tx, updatedData model.UpdateLeaveBalanceModel, leave_type string) (int, error) {
+	var (
+		updatedColumn int
+	)
+
 	query := fmt.Sprintf(`
 		UPDATE 
 			leave_balance 
@@ -62,15 +122,17 @@ func (db *leaveBalanceConnection) UpdateLeaveBalance(updatedData entity.UpdateLe
 			%v=%v, cuti_diambil=%v
 		WHERE 
 			user_id=%v
-		RETURNING %v;
-		`, leave_type, updatedData.Amounts, updatedData.Cuti_diambil, updatedData.User_id, leave_type)
-	err := db.connection.QueryRow(query).Scan(&updatedColumn)
+		RETURNING leave_id;
+		`, leave_type, updatedData.Amounts, updatedData.Cuti_diambil, updatedData.User_id)
+
+	err := tx.QueryRowxContext(ctx, query).Scan(
+		&updatedColumn,
+	)
 
 	if err != nil {
-		if err != nil {
-			log.Println("| " + err.Error())
-			return 0, err
-		}
+		utils.LogError("Repo", "func UpdateLeaveBalance", err)
+		return updatedColumn, err
 	}
+
 	return updatedColumn, err
 }

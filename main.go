@@ -1,112 +1,155 @@
 package main
 
 import (
-	"database/sql"
 	"log"
-	"net/http"
-	"os"
+	"time"
 
-	"github.com/dafiqarba/be-payroll/config"
 	"github.com/dafiqarba/be-payroll/controller"
+	"github.com/dafiqarba/be-payroll/databases"
 	"github.com/dafiqarba/be-payroll/middleware"
 	"github.com/dafiqarba/be-payroll/repository"
+	"github.com/dafiqarba/be-payroll/router"
 	"github.com/dafiqarba/be-payroll/services"
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
-	// "github.com/jinzhu/gorm"
-	// "gorm.io/gorm"
+	"github.com/gofiber/fiber/v2"
+	"github.com/jmoiron/sqlx"
+	"github.com/spf13/viper"
 )
 
 var (
-	db *sql.DB = config.SetupDatabaseConnection()
-	// gormDB *gorm.DB = config.InitGormDB(db)
-
-	userRepo    repository.UserRepo       = repository.NewUserRepo(db)
-	userSvc     services.UserService      = services.NewUserService(userRepo)
-	userHandler controller.UserController = controller.NewUserController(userSvc)
-
-	leaveBalanceRepo    repository.LeaveBalanceRepo       = repository.NewLeaveBalanceRepo(db)
-	leaveBalanceSvc     services.LeaveBalanceService      = services.NewLeaveBalanceService(leaveBalanceRepo)
-	leaveBalanceHandler controller.LeaveBalanceController = controller.NewLeaveBalanceController(leaveBalanceSvc)
-
-	leaveRecordRepo    repository.LeaveRecordRepo       = repository.NewLeaveRecordRepo(db)
-	leaveRecordSvc     services.LeaveRecordService      = services.NewLeaveRecordService(leaveRecordRepo)
-	leaveRecordHandler controller.LeaveRecordController = controller.NewLeaveRecordController(leaveRecordSvc)
-
-	payrollRecordRepo    repository.PayrollRecordRepo       = repository.NewPayrollRecordRepo(db)
-	payrollRecordSvc     services.PayrollRecordService      = services.NewPayrollRecordService(payrollRecordRepo)
-	payrollRecordHandler controller.PayrollRecordController = controller.NewPayrollRecordController(payrollRecordSvc)
-
-	// adminApprovalRepo    repository.AdminApprovalRepo       = repository.NewApprovalRepo(gormDB)
-	// adminApprovalSvc     services.AdminApprovalService      = services.NewAdminApprovalService(adminApprovalRepo)
-	// adminApprovalHandler controller.AdminApprovalController = controller.NewAdminApprovalController(adminApprovalSvc)
-
-	authService    services.AuthService      = services.NewAuthService(userRepo)
-	jwtService     services.JWTService       = services.NewJWTService()
-	authController controller.AuthController = controller.NewAuthController(authService, jwtService, userSvc)
+	dbRepoConn databases.DatabaseRepo = databases.NewPostgresRepo()
+	db         *sqlx.DB
 )
 
-func main() {
-	file, err := os.OpenFile("logs.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+func init() {
+	viper.SetConfigFile(`.env`)
+	err := viper.ReadInConfig()
 	if err != nil {
-		log.Fatalln("Failed to open log file:", err)
+		log.Println(err)
 	}
 
-	// Use gorilla mux
-	router := mux.NewRouter()
-	// CORS handlers
-	headers := handlers.AllowedHeaders([]string{
-		"X-Requested-With",
-		"Content-Type",
-		"Authorization",
-		"Access-Control-Allow-Origin"})
-	origins := handlers.AllowedOrigins([]string{"*"})
-	methods := handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "PUT", "OPTIONS"})
-	credentials := handlers.AllowCredentials()
+	dbHost := viper.GetString(`DB_HOST`)
+	dbPort := viper.GetInt(`DB_PORT`)
+	dbUser := viper.GetString(`DB_USER`)
+	dbPass := viper.GetString(`DB_PASSWORD`)
+	dbName := viper.GetString(`DB_NAME`)
+	dbMigrateVersion := viper.GetUint(`DB_MIGRATE_VERSION`)
+	runMigration := viper.GetBool(`DB_MIGRATE`)
+	dbDriver := viper.GetString(`DB_DRIVER`)
 
-	/*-----------------------------------------------------------------------
-	1.	Admin & User role
-		Login					= /login
-		Register				= /register
+	db, err = dbRepoConn.Connect(dbHost, dbPort, dbUser, dbPass, dbName, dbMigrateVersion, runMigration, dbDriver)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
 
-	2.	User Route:
-		User Detail				= /user-detail?id=2
-		Calc Leave Balance		= /update-leave-balance/:id
-		Leave Balance Detail	= /leave-balance?id=1&year=2022
-		Leave Record Detail		= /leave-record-detail?req_id=1&id=2
-		Leave Record List		= /leave-record-list?id=2&year=ASC
-		Create Leave Record		= /create-leave-record
-		TO DO:
-		b. payroll list
+func main() {
+	app := fiber.New()
 
-	TO DO:
-	all route for admin
-	 ------------------------------------------------------------------------*/
-	protectR := router.Methods(http.MethodPost, http.MethodGet, http.MethodPut).Subrouter()
-	protectR.HandleFunc("/user-list", userHandler.GetUserList).Methods(http.MethodGet)
-	protectR.HandleFunc("/leave-balance", leaveBalanceHandler.GetLeaveBalance).Methods(http.MethodGet)
-	protectR.HandleFunc("/update-leave-balance/{user_id:[0-9]+}", leaveBalanceHandler.UpdateLeaveBalance).Methods(http.MethodPut)
-	protectR.HandleFunc("/leave-record-detail", leaveRecordHandler.GetLeaveRecordDetail).Methods(http.MethodGet)
-	protectR.HandleFunc("/leave-record-list", leaveRecordHandler.GetLeaveRecordList).Methods(http.MethodGet)
-	protectR.HandleFunc("/create-leave-record", leaveRecordHandler.CreateLeaveRecord).Methods(http.MethodPost)
-	protectR.HandleFunc("/user-detail", userHandler.GetUserDetail).Methods(http.MethodGet)
+	apiVersion := viper.GetString(`API_VERSION`)
+	appPort := viper.GetInt(`PORT`)
+	secretKey := viper.GetString("JWT_SECRET")
+	customJwt := services.NewJWTService(secretKey)
+	timeoutCtx := time.Duration(viper.GetInt(`TIMEOUT_SECOND`)) * time.Second
 
-	// protectR.HandleFunc("/admin-approval", adminApprovalHandler.GetAdminApprovalList).Methods(http.MethodGet)
+	repoLeaveBalance := repository.NewLeaveBalanceRepo(db)
+	repoLeaveRecord := repository.NewLeaveRecordRepo(db)
+	repoPayrollRecord := repository.NewPayrollRecordRepo(db)
+	repoUser := repository.NewUserRepo(db)
+	repoPosition := repository.NewPositionRepo(db)
+	repoRole := repository.NewRoleRepo(db)
+	repoStatus := repository.NewStatusRepo(db)
 
-	protectR.HandleFunc("/payroll/list", payrollRecordHandler.GetPayrollRecordList).Methods(http.MethodGet)
-	protectR.HandleFunc("/payroll/detail/{id:[0-9]+}", payrollRecordHandler.GetPayrollRecordDetail).Methods(http.MethodGet)
-	protectR.HandleFunc("/payroll/create", payrollRecordHandler.CreatePayrollRecord).Methods(http.MethodPost)
-	protectR.HandleFunc("/payroll/update/{id:[0-9]+}", payrollRecordHandler.UpdatePayrollRecord).Methods(http.MethodPut)
-	protectR.HandleFunc("/payroll/create-list", payrollRecordHandler.CreatePayrollRecordList).Methods(http.MethodPost)
+	serviceAuth := services.NewAuthService(repoUser, timeoutCtx, db)
+	serviceLeaveBalance := services.NewLeaveBalanceService(repoLeaveBalance, timeoutCtx, db)
+	serviceLeaveRecord := services.NewLeaveRecordService(repoLeaveRecord, timeoutCtx, db)
+	servicePayrollRecord := services.NewPayrollRecordService(repoPayrollRecord, timeoutCtx, db)
+	serviceUser := services.NewUserService(repoUser, timeoutCtx, db)
+	servicePosition := services.NewPositionService(repoPosition, timeoutCtx, db)
+	serviceRole := services.NewRoleService(repoRole, timeoutCtx, db)
+	serviceStatus := services.NewStatusService(repoStatus, timeoutCtx, db)
 
-	protectR.Use(middleware.AuthorizeJWT(jwtService))
+	controllerAuth := controller.NewAuthController(serviceAuth, customJwt, serviceUser)
+	controllerLeaveBalance := controller.NewLeaveBalanceController(serviceLeaveBalance)
+	controllerLeaveRecord := controller.NewLeaveRecordController(serviceLeaveRecord)
+	controllerPayrollRecord := controller.NewPayrollRecordController(servicePayrollRecord)
+	controllerUser := controller.NewUserController(serviceUser)
+	controllerPosition := controller.NewPositionController(servicePosition)
+	controllerRole := controller.NewRoleController(serviceRole)
+	controllerStatus := controller.NewStatusController(serviceStatus)
 
-	router.HandleFunc("/register", authController.Register).Methods(http.MethodPost)
-	router.HandleFunc("/login", authController.Login).Methods(http.MethodPost)
+	mw := middleware.InitCustomMiddleware(customJwt)
 
-	log.SetOutput(file)
+	httpRouter := router.NewFiberRouter(app)
 
-	//Start server
-	log.Println("| Server listening on port: 8000")
-	log.Fatal(http.ListenAndServe("0.0.0.0:"+os.Getenv("PORT"), handlers.CORS(headers, origins, methods, credentials)(router)))
+	httpRouter.Use(mw.LoggerMiddleware(), mw.CORSMiddleware(), mw.MethodMiddleware())
+	version := httpRouter.Group(apiVersion)
+
+	version.Get("/", func(c *fiber.Ctx) error {
+		log.Println(c.OriginalURL())
+		return c.SendString("Hello, World!")
+	}).Name("index")
+
+	httpRouter.UserList(version, controllerUser)
+	httpRouter.UserDetail(version, controllerUser)
+
+	httpRouter.Login(version, controllerAuth)
+	httpRouter.Register(version, controllerAuth)
+
+	httpRouter.LeaveBalance(version, controllerLeaveBalance)
+	httpRouter.LeaveBalanceUpdate(version, controllerLeaveBalance)
+	httpRouter.LeaveRecordCreate(version, controllerLeaveRecord)
+	httpRouter.LeaveRecordDetail(version, controllerLeaveRecord)
+	httpRouter.LeaveRecordList(version, controllerLeaveRecord)
+
+	httpRouter.PayrollCreate(version, controllerPayrollRecord)
+	httpRouter.PayrollCreateList(version, controllerPayrollRecord)
+	httpRouter.PayrollDetail(version, controllerPayrollRecord)
+	httpRouter.PayrollList(version, controllerPayrollRecord)
+	httpRouter.PayrollUpdate(version, controllerPayrollRecord)
+
+	httpRouter.PositionList(version, controllerPosition)
+	httpRouter.PositionCreate(version, controllerPosition)
+	httpRouter.PositionUpdate(version, controllerPosition)
+	httpRouter.PositionDelete(version, controllerPosition)
+	httpRouter.PositionDetail(version, controllerPosition)
+
+	httpRouter.RoleList(version, controllerRole)
+	httpRouter.RoleCreate(version, controllerRole)
+	httpRouter.RoleUpdate(version, controllerRole)
+	httpRouter.RoleDelete(version, controllerRole)
+	httpRouter.RoleDetail(version, controllerRole)
+
+	httpRouter.StatusList(version, controllerStatus)
+	httpRouter.StatusCreate(version, controllerStatus)
+	httpRouter.StatusUpdate(version, controllerStatus)
+	httpRouter.StatusDelete(version, controllerStatus)
+	httpRouter.StatusDetail(version, controllerStatus)
+
+	// data, _ := json.MarshalIndent(httpRouter.App().GetRoutes(true), "", "  ")
+	// log.Println("routes: ", string(data))
+	// log.Println("port: ", appPort)
+	// log.Println("api version: ", version)
+
+	httpRouter.Run(appPort, "be-payroll")
+
+	// v1 := app.Group("/v1")
+
+	// v1.Get("/user-list", controllerUser.GetUserList())
+	// v1.Get("/user-detail", controllerUser.GetUserDetail())
+
+	// v1.Post("/register", controllerAuth.Register())
+	// v1.Post("/login", controllerAuth.Login())
+
+	// v1.Get("/leave-balance", controllerLeaveBalance.GetLeaveBalance())
+	// v1.Put("/update-leave-balance/{user_id:[0-9]+}", controllerLeaveBalance.UpdateLeaveBalance())
+
+	// v1.Get("/leave-record-detail", controllerLeaveRecord.GetLeaveRecordDetail())
+	// v1.Get("/leave-record-list", controllerLeaveRecord.GetLeaveRecordList())
+	// v1.Post("/create-leave-record", controllerLeaveRecord.GetLeaveRecordList())
+
+	// v1.Get("/payroll/list", controllerPayrollRecord.GetPayrollRecordList())
+	// v1.Get("/payroll/detail/{id:[0-9]+}", controllerPayrollRecord.GetPayrollRecordDetail())
+	// v1.Post("/payroll/create", controllerPayrollRecord.CreatePayrollRecord())
+	// v1.Put("/payroll/update/{id:[0-9]+}", controllerPayrollRecord.UpdatePayrollRecord())
+	// v1.Post("/payroll/create-list", controllerPayrollRecord.CreatePayrollRecordList())
 }

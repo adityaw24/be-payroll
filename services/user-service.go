@@ -1,69 +1,130 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"errors"
-	"log"
+	"time"
 
-	"github.com/dafiqarba/be-payroll/dto"
-	"github.com/dafiqarba/be-payroll/entity"
+	"github.com/dafiqarba/be-payroll/model"
 	"github.com/dafiqarba/be-payroll/repository"
 	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 type UserService interface {
 	//Insert
-	CreateUser(user dto.RegisterUser) (string, error)
+	CreateUser(ctx context.Context, u model.RegisterUser) (string, error)
 	//Read
-	GetUserList() ([]entity.User, error)
-	GetUserDetail(id int) (entity.UserDetailModel, error)
+	GetUserList(ctx context.Context) ([]model.User, error)
+	GetUserDetail(ctx context.Context, id uuid.UUID) (model.UserDetailModel, error)
 }
 
 type userService struct {
 	userRepository repository.UserRepo
+	timeoutContext time.Duration
+	db             *sqlx.DB
 }
 
-func NewUserService(userRepo repository.UserRepo) UserService {
+func NewUserService(userRepo repository.UserRepo, timeoutContext time.Duration, db *sqlx.DB) UserService {
 	return &userService{
 		userRepository: userRepo,
+		timeoutContext: timeoutContext,
+		db:             db,
 	}
 }
 
-func (service *userService) GetUserList() ([]entity.User, error) {
-	return service.userRepository.GetUserList()
+func (service *userService) GetUserList(ctx context.Context) ([]model.User, error) {
+	ctx, cancel := context.WithTimeout(ctx, service.timeoutContext)
+	defer cancel()
+
+	var (
+		list []model.User
+		err  error
+	)
+
+	list, err = service.userRepository.GetUserList(ctx)
+	if err != nil {
+		utils.LogError("Services", "GetUserList", err)
+		return list, err
+	}
+	return list, err
 }
 
-func (service *userService) GetUserDetail(id int) (entity.UserDetailModel, error) {
-	return service.userRepository.GetUserDetail(id)
+func (service *userService) GetUserDetail(ctx context.Context, id uuid.UUID) (model.UserDetailModel, error) {
+	ctx, cancel := context.WithTimeout(ctx, service.timeoutContext)
+	defer cancel()
+
+	var (
+		detail model.UserDetailModel
+		err    error
+	)
+	detail, err = service.userRepository.GetUserDetail(ctx, id)
+	if err != nil {
+		utils.LogError("Services", "GetUserDetail", err)
+		return detail, err
+	}
+	return detail, err
 }
 
-func (service *userService) CreateUser(d dto.RegisterUser) (string, error) {
+func (service *userService) CreateUser(ctx context.Context, u model.RegisterUser) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, service.timeoutContext)
+	defer cancel()
+
+	var (
+		email string
+		err   error
+	)
+
+	tx, err := service.db.Beginx()
+	if err != nil {
+		utils.LogError("Services", "CreateUser open tx", err)
+		return email, err
+	}
+
 	//Checks if the email is already registered by forwarding to FindByEmail repo
-	_, err := service.userRepository.FindByEmail(d.Email)
+	user, err := service.userRepository.FindByEmail(ctx, u.Email)
+
 	//If email is already registered, returns empty data and error
-	if err == nil {
-		log.Println("| Email already registered ")
-		return "", errors.New("email address already registered")
+	if user.Email != "" {
+		err = errors.New("email address already registered")
+		utils.LogError("Service", "CreateUser", err)
+		utils.CommitOrRollback(tx, "Services CreateUser", err)
+		return email, err
 	}
+
 	//If error occured and the error is not because of no row returned, returns empty data and error
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-	// If no error occured, map dto to entity.User
-	//Hash plain password
-	hashedPassword, err := utils.Hash(d.Password)
-	if err != nil {
-		log.Println("| Failed to hash a password " + err.Error())
-	}
-	registeredData := entity.User{
-		Name:        d.Name,
-		Username:    d.Username,
-		Password:    hashedPassword,
-		Email:       d.Email,
-		Nik:         d.Nik,
-		Role_id:     d.Role_id,
-		Position_id: d.Position_id,
+		utils.LogError("Service", "CreateUser", err)
+		utils.CommitOrRollback(tx, "Services CreateUser", err)
+		return email, err
 	}
 
-	return service.userRepository.CreateUser(registeredData)
+	// If no error occured, map model to model.User
+	//Hash plain password
+	hashedPassword, err := utils.Hash(u.Password)
+	if err != nil {
+		utils.LogError("Service", "CreateUser Hash password", err)
+		utils.CommitOrRollback(tx, "Services CreateUser hash password", err)
+		return email, err
+	}
+
+	registeredData := model.User{
+		Name:        u.Name,
+		Username:    u.Username,
+		Password:    hashedPassword,
+		Email:       u.Email,
+		Nik:         u.Nik,
+		Role_id:     u.Role_id,
+		Position_id: u.Position_id,
+	}
+
+	email, err = service.userRepository.CreateUser(ctx, tx, registeredData)
+	if err != nil {
+		utils.LogError("Service", "CreateUser", err)
+		utils.CommitOrRollback(tx, "Services CreateUser", err)
+		return email, err
+	}
+	return email, nil
 }

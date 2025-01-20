@@ -3,16 +3,17 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/dafiqarba/be-payroll/services"
 	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type UserController interface {
 	//Read Operation
-	GetUserList(response http.ResponseWriter, request *http.Request)
-	GetUserDetail(response http.ResponseWriter, request *http.Request)
+	GetUserList() fiber.Handler
+	GetUserDetail() fiber.Handler
 }
 
 type userController struct {
@@ -25,24 +26,32 @@ func NewUserController(userServ services.UserService) UserController {
 	}
 }
 
-func (c *userController) GetUserList(response http.ResponseWriter, request *http.Request) {
+func (c *userController) GetUserList() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
 
-	var users, err = c.userService.GetUserList()
-	if err != nil {
-		utils.BuildErrorResponse(response, http.StatusInternalServerError, err.Error())
+		var users, err = c.userService.GetUserList(ctx.Context())
+		if err != nil {
+			utils.BuildErrorResponse(ctx, http.StatusInternalServerError, err.Error())
+			return err
+		}
+		utils.BuildResponse(ctx, http.StatusOK, "success", users)
+
+		return err
 	}
-	utils.BuildResponse(response, http.StatusOK, "success", users)
 }
 
-func (c *userController) GetUserDetail(response http.ResponseWriter, request *http.Request) {
-	v := request.URL.Query()
-	id,_ := strconv.Atoi(v.Get("id"))
+func (c *userController) GetUserDetail() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		v := ctx.Queries()
+		id := uuid.MustParse(v["id"])
 
-	var userDetail, err = c.userService.GetUserDetail(id)
-	if err != nil {
-		errMsg := errors.New("the server cannot find the requested resource").Error()
-		utils.BuildErrorResponse(response, http.StatusNotFound, errMsg)
-		return
+		var userDetail, err = c.userService.GetUserDetail(ctx.Context(), id)
+		if err != nil {
+			errMsg := errors.New("the server cannot find the requested resource").Error()
+			utils.BuildErrorResponse(ctx, http.StatusNotFound, errMsg)
+			return err
+		}
+		utils.BuildResponse(ctx, http.StatusOK, "success", userDetail)
+		return err
 	}
-	utils.BuildResponse(response, http.StatusOK, "success", userDetail)
 }

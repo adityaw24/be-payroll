@@ -1,21 +1,20 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/dafiqarba/be-payroll/entity"
+	"github.com/dafiqarba/be-payroll/model"
 	"github.com/dafiqarba/be-payroll/services"
 	"github.com/dafiqarba/be-payroll/utils"
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type LeaveBalanceController interface {
-	GetLeaveBalance(response http.ResponseWriter, request *http.Request)
-	UpdateLeaveBalance(res http.ResponseWriter, req *http.Request)
+	GetLeaveBalance() fiber.Handler
+	UpdateLeaveBalance() fiber.Handler
 }
 
 type leaveBalanceController struct {
@@ -28,52 +27,57 @@ func NewLeaveBalanceController(leaveBalanceServ services.LeaveBalanceService) Le
 	}
 }
 
-func (c *leaveBalanceController) GetLeaveBalance(response http.ResponseWriter, request *http.Request) {
-	v := request.URL.Query()
-	id,_ := strconv.Atoi(v.Get("id"))
-	year := v.Get("year")
-	
-	var leaveBalance, err = c.leaveBalanceService.GetLeaveBalance(id, year)
-	if err != nil {
-		errMsg := errors.New(" the server cannot find the requested resource").Error()
-		utils.BuildErrorResponse(response, http.StatusNotFound, errMsg)
-		return
+func (c *leaveBalanceController) GetLeaveBalance() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		id := uuid.MustParse(ctx.Params("user_id"))
+		year := ctx.Query("year")
+
+		var leaveBalance, err = c.leaveBalanceService.GetLeaveBalance(ctx.Context(), id, year)
+		if err != nil {
+			errMsg := errors.New(" the server cannot find the requested resource").Error()
+			utils.BuildErrorResponse(ctx, http.StatusNotFound, errMsg)
+			return err
+		}
+		utils.BuildResponse(ctx, http.StatusOK, "success", leaveBalance)
+		return err
 	}
-	utils.BuildResponse(response, http.StatusOK, "success", leaveBalance)
 }
 
-func (c *leaveBalanceController) UpdateLeaveBalance(res http.ResponseWriter, req *http.Request) {
-	// Take url param
-	params := mux.Vars(req)
-	user_id, errConv := strconv.Atoi(params["user_id"])
-	if errConv != nil {
-		utils.BuildErrorResponse(res, http.StatusBadRequest, errConv.Error())
-		return
-	} 
-	//Updated data model
-	var updatedData entity.UpdateLeaveBalanceModel
-	updatedData.User_id = user_id
-	//Decode JSON body
-	errDec := json.NewDecoder(req.Body).Decode(&updatedData)
-	if errDec != nil{
-		utils.BuildErrorResponse(res, http.StatusBadRequest, errDec.Error())
-		return
-	}
-	// Forward data to service
-	updatedAmounts, err := c.leaveBalanceService.UpdateLeaveBalance(updatedData)
-	if err != nil {
-		// convert err to str
-		errString := err.Error()
-		var httpStatus int
-		if strings.Contains(errString, "no rows") {
-			httpStatus = http.StatusNotFound
-			errString = "the server cannot find the requested resource"
-		} else if strings.Contains(errString, "tidak mencukupi") {
-			httpStatus = http.StatusBadRequest
+func (c *leaveBalanceController) UpdateLeaveBalance() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		// Take url param
+		param_user_id := ctx.Params("user_id")
+		if param_user_id == "" {
+			err := errors.New("user_id is required")
+			utils.BuildErrorResponse(ctx, http.StatusBadRequest, err.Error())
+			return err
 		}
-		utils.BuildErrorResponse(res, httpStatus, errString)
-		return
+		//Updated data model
+		var updatedData model.UpdateLeaveBalanceModel
+		updatedData.User_id = uuid.MustParse(param_user_id)
+		//Decode JSON body
+		err := ctx.BodyParser(&updatedData)
+		if err != nil {
+			utils.BuildErrorResponse(ctx, http.StatusBadRequest, err.Error())
+			return err
+		}
+		// Forward data to service
+		updatedAmounts, err := c.leaveBalanceService.UpdateLeaveBalance(ctx.Context(), updatedData)
+		if err != nil {
+			// convert err to str
+			errString := err.Error()
+			var httpStatus int
+			if strings.Contains(errString, "no rows") {
+				httpStatus = http.StatusNotFound
+				errString = "the server cannot find the requested resource"
+			} else if strings.Contains(errString, "tidak mencukupi") {
+				httpStatus = http.StatusBadRequest
+			}
+			utils.BuildErrorResponse(ctx, httpStatus, errString)
+			return err
+		}
+		// Serve results
+		utils.BuildResponse(ctx, http.StatusOK, "successfully updated new value", updatedAmounts)
+		return err
 	}
-	// Serve results
-	utils.BuildUpdateResponse(res, http.StatusOK, "successfully updated new value", updatedAmounts)
 }

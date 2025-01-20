@@ -1,10 +1,12 @@
 package repository
 
 import (
-	"database/sql"
-	"log"
+	"context"
 
-	"github.com/dafiqarba/be-payroll/entity"
+	"github.com/dafiqarba/be-payroll/model"
+	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 )
 
@@ -12,53 +14,73 @@ import (
 
 type UserRepo interface {
 	//Create
-	CreateUser(user entity.User) (string, error)
+	CreateUser(ctx context.Context, tx *sqlx.Tx, u model.User) (string, error)
 	//Read
-	FindByEmail(email string) (entity.UserLogin, error)
-	GetUserList() ([]entity.User, error)
-	GetUserDetail(id int) (entity.UserDetailModel, error)
+	FindByEmail(ctx context.Context, email string) (model.UserResponse, error)
+	GetUserList(ctx context.Context) ([]model.User, error)
+	GetUserDetail(ctx context.Context, id uuid.UUID) (model.UserDetailModel, error)
 }
 
 type userConnection struct {
-	connection *sql.DB
+	connection *sqlx.DB
 }
 
-func NewUserRepo(dbConn *sql.DB) UserRepo {
+func NewUserRepo(dbConn *sqlx.DB) UserRepo {
 	return &userConnection{
 		connection: dbConn,
 	}
 }
 
-func (db *userConnection) GetUserList() ([]entity.User, error) {
+func (db *userConnection) GetUserList(ctx context.Context) ([]model.User, error) {
 	//Variable to store collection of users
-	var users []entity.User
+	users := make([]model.User, 0)
+
 	//Execute SQL Query
-	rows, err := db.connection.Query(`SELECT * FROM users`)
+	query := `SELECT * FROM users`
+	rows, err := db.connection.QueryxContext(ctx, query)
+
 	//Error Handling
 	if err != nil {
-		log.Fatalf("tidak bisa mengeksekusi query. %v", err)
+		utils.LogError("Repo", "func GetUserList", err)
+		return users, err
 	}
-	log.Println("|  Requst received")
+
 	//Close the Execution of SQL Query
 	defer rows.Close()
+
 	//Iterate over all available rows and strore the data
 	for rows.Next() {
-		var user entity.User
+		var user model.User
 		// scan and assign into destination variable
-		err = rows.Scan(&user.User_id, &user.Email, &user.Password, &user.Name, &user.Position_id, &user.Nik, &user.Role_id)
+		err = rows.Scan(
+			&user.User_id,
+			&user.Email,
+			&user.Password,
+			&user.Name,
+			&user.Position_id,
+			&user.Nik,
+			&user.Role_id,
+		)
+
 		if err != nil {
-			log.Fatalf("tidak bisa mengambil data. %v", err)
+			utils.LogError("Repo", "GetUserList scan data", err)
+			return users, err
 		}
 		// append to users slice
 		users = append(users, user)
 	}
+
+	utils.CloseDB(rows)
 	// returns populated data
 	return users, err
 }
 
-func (db *userConnection) GetUserDetail(id int) (entity.UserDetailModel, error) {
+func (db *userConnection) GetUserDetail(ctx context.Context, id uuid.UUID) (model.UserDetailModel, error) {
 
-	var userDetail entity.UserDetailModel
+	var (
+		userDetail model.UserDetailModel
+	)
+
 	//SQL Query
 	query := `
 		SELECT 
@@ -69,29 +91,39 @@ func (db *userConnection) GetUserDetail(id int) (entity.UserDetailModel, error) 
 			INNER JOIN positions AS p 
 				ON p.position_id = u.position_id 
 		WHERE user_id=$1`
+
 	//Execute SQL Query
-	row := db.connection.QueryRow(query,id)
-	err := row.Scan(&userDetail.User_id, &userDetail.Username, &userDetail.Name, &userDetail.Position_id, &userDetail.Nik, &userDetail.Role_id, &userDetail.Role_name, &userDetail.Position_name)
-	
+	err := db.connection.QueryRowxContext(
+		ctx,
+		query,
+		id,
+	).Scan(
+		&userDetail.User_id,
+		&userDetail.Username,
+		&userDetail.Name,
+		&userDetail.Position_id,
+		&userDetail.Nik,
+		&userDetail.Role_id,
+		&userDetail.Role_name,
+		&userDetail.Position_name,
+	)
+
 	//Err Handling
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Println("| "+err.Error())
-			return userDetail, err
-		} else {
-			log.Println("| "+err.Error())
-			return userDetail, err
-		}
+		utils.LogError("Repo", "func GetUserDetail", err)
+		return userDetail, err
 	}
-	
+
 	// returns login data
 	return userDetail, err
 }
 
-
-func (db *userConnection) CreateUser (u entity.User) (string, error) {
+func (db *userConnection) CreateUser(ctx context.Context, tx *sqlx.Tx, u model.User) (string, error) {
 	//Variable that holds registered user email
-	var createdUser string
+	var (
+		createdUser string
+	)
+
 	//Query
 	query := `
 		INSERT INTO 
@@ -102,19 +134,36 @@ func (db *userConnection) CreateUser (u entity.User) (string, error) {
 			;
 	`
 	//Execute query and Populating createdUser variable
-	err := db.connection.QueryRow(query, u.Username, u.Name, u.Password, u.Email, u.Nik, u.Role_id, u.Position_id).Scan(&createdUser)
-	
+	err := db.connection.QueryRowxContext(
+		ctx,
+		query,
+		u.Username,
+		u.Name,
+		u.Password,
+		u.Email,
+		u.Nik,
+		u.Role_id,
+		u.Position_id,
+	).Scan(
+		&createdUser,
+	)
+
+	//Err Handling
 	if err != nil {
-		log.Println("| " + err.Error())
-		return "", err
+		utils.LogError("Repo", "func CreateUser", err)
+		return createdUser, err
 	}
+
 	//Returns registered user email and nil error
 	return createdUser, err
 }
 
-func (db *userConnection) FindByEmail (emailToCheck string) (entity.UserLogin, error) {
+func (db *userConnection) FindByEmail(ctx context.Context, email string) (model.UserResponse, error) {
 	// Var to be populated with user data
-	var userData entity.UserLogin
+	var (
+		userData model.UserResponse
+	)
+
 	//Query
 	query := `
 		SELECT 
@@ -124,20 +173,26 @@ func (db *userConnection) FindByEmail (emailToCheck string) (entity.UserLogin, e
 		WHERE
 			email = $1;
 	`
+
 	//Execute
-	row := db.connection.QueryRow(query, emailToCheck)
-	err := row.Scan(&userData.User_id, &userData.Username, &userData.Email, &userData.Password, &userData.Role_id)
+	err := db.connection.QueryRowxContext(
+		ctx,
+		query,
+		email,
+	).Scan(
+		&userData.User_id,
+		&userData.Username,
+		&userData.Email,
+		&userData.Password,
+		&userData.Role_id,
+	)
+
 	//Err Handling
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Println("| "+err.Error())
-			return userData, err
-		} else {
-			log.Println("| "+err.Error())
-			return userData, err
-		}
+		utils.LogError("Repo", "func FindByEmail", err)
+		return userData, err
 	}
-	
+
 	// returns login data
 	return userData, err
 }

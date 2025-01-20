@@ -1,4 +1,4 @@
-package config
+package databases
 
 import (
 	"database/sql"
@@ -15,7 +15,7 @@ func InitGormDB(db *sql.DB) *gorm.DB {
 		Conn: db,
 	}), &gorm.Config{})
 
-	if err!=nil {
+	if err != nil {
 		log.Fatal("error connecting to database: ", err)
 	}
 

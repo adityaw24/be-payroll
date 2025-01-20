@@ -1,40 +1,58 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"log"
+	"time"
 
-	"github.com/dafiqarba/be-payroll/dto"
-	"github.com/dafiqarba/be-payroll/entity"
+	"github.com/dafiqarba/be-payroll/model"
 	"github.com/dafiqarba/be-payroll/repository"
+	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService interface {
-	VerifyCredentials(d dto.UserLogin) (entity.UserLogin, error)
+	VerifyCredentials(ctx context.Context, d model.UserLogin) (model.UserResponse, error)
 }
 
 type authService struct {
-	userRepo repository.UserRepo
+	userRepo       repository.UserRepo
+	timeoutContext time.Duration
+	db             *sqlx.DB
 }
 
-func NewAuthService (userRepo repository.UserRepo) AuthService {
-	return &authService {
-		userRepo: userRepo,
+func NewAuthService(userRepo repository.UserRepo, timeoutContext time.Duration, db *sqlx.DB) AuthService {
+	return &authService{
+		userRepo:       userRepo,
+		timeoutContext: timeoutContext,
+		db:             db,
 	}
 }
 
-func (service *authService) VerifyCredentials(d dto.UserLogin) (entity.UserLogin, error) {
+func (service *authService) VerifyCredentials(ctx context.Context, d model.UserLogin) (model.UserResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, service.timeoutContext)
+	defer cancel()
+
+	var (
+		user model.UserResponse
+		err  error
+	)
+
 	//Retrieve matched entered email and password
-	user, err := service.userRepo.FindByEmail(d.Email)
+	user, err = service.userRepo.FindByEmail(ctx, d.Email)
 	if err != nil {
-		log.Println("| "+err.Error())
-			return user, err
+		utils.LogError("Services", "VerifyCredentials", err)
+		return user, err
 	}
+
 	//Compare password
 	isValid := comparePassword(user.Password, d.Password)
 	if !isValid {
-		return user, errors.New("failed to login. check your credential")
+		err = errors.New("failed to login. check your credential")
+		utils.LogError("Services", "VerifyCredentials", err)
+		return user, err
 	}
 	//Return login user data
 	return user, nil
@@ -44,10 +62,9 @@ func (service *authService) VerifyCredentials(d dto.UserLogin) (entity.UserLogin
 func comparePassword(hashedPass string, plainPass string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(plainPass))
 	if err != nil && err == bcrypt.ErrMismatchedHashAndPassword {
-		log.Println("| Incorrect password. Error "+err.Error())
+		utils.LogError("Services", "VerifyCredentials", err)
 		return false
 	}
 	log.Println("| Password Matched.")
 	return true
 }
-

@@ -1,38 +1,40 @@
 package repository
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"fmt"
-	"log"
 
-	"github.com/dafiqarba/be-payroll/entity"
+	"github.com/dafiqarba/be-payroll/model"
+	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 type PayrollRecordRepo interface {
 	//Read
-	GetPayrollRecordList() ([]entity.PayrollRecordListModel, error)
-	GetPayrollRecordDetail(id int) (entity.PayrollRecordDetailModel, error)
+	GetPayrollRecordList(ctx context.Context) ([]model.PayrollRecordListModel, error)
+	GetPayrollRecordDetail(ctx context.Context, id uuid.UUID) (model.PayrollRecordDetailModel, error)
 	//Create
-	// CreatePayrollRecord(p entity.PayrollRecord) (entity.PayrollRecord, error)
-	CreatePayrollRecord(p entity.PayrollRecord) (int, error)
+	// CreatePayrollRecord(ctx context.Context, tx *sqlx.Tx, p model.PayrollRecord) (model.PayrollRecord, error)
+	CreatePayrollRecord(ctx context.Context, tx *sqlx.Tx, p model.PayrollRecord) (uuid.UUID, error)
 	//Update
-	UpdatePayrollRecord(id int, p entity.PayrollRecord) (int, error)
-	// UpdatePayrollRecord(id int, p entity.PayrollRecord) (entity.PayrollRecord, error)
+	UpdatePayrollRecord(ctx context.Context, tx *sqlx.Tx, id uuid.UUID, p model.PayrollRecord) (uuid.UUID, error)
+	// UpdatePayrollRecord(ctx context.Context, id int, p model.PayrollRecord) (model.PayrollRecord, error)
 }
 
 type payrollRecordRepo struct {
-	connection *sql.DB
+	connection *sqlx.DB
 }
 
-func NewPayrollRecordRepo(db *sql.DB) PayrollRecordRepo {
+func NewPayrollRecordRepo(db *sqlx.DB) PayrollRecordRepo {
 	return &payrollRecordRepo{
 		connection: db,
 	}
 }
 
-func (db *payrollRecordRepo) GetPayrollRecordList() ([]entity.PayrollRecordListModel, error) {
-	var payrollRecordList []entity.PayrollRecordListModel
+func (db *payrollRecordRepo) GetPayrollRecordList(ctx context.Context) ([]model.PayrollRecordListModel, error) {
+	payrollRecordList := make([]model.PayrollRecordListModel, 0)
 
 	// err := db.connection.QueryRow("SELECT * FROM payroll_records WHERE employee_id = ? AND year = ?", id, year).Scan(&payrollRecordList)
 
@@ -55,32 +57,48 @@ func (db *payrollRecordRepo) GetPayrollRecordList() ([]entity.PayrollRecordListM
 				INNER JOIN users u ON p.user_id = u.user_id
 		;`
 
-	rows, err := db.connection.Query(query)
+	rows, err := db.connection.QueryxContext(ctx, query)
 
 	if err != nil {
-		log.Printf("Cannot execute query: %v", err)
+		utils.LogError("Repo", "GetPayrollRecordList", err)
+		return payrollRecordList, err
 	}
+
 	defer rows.Close()
 
 	for rows.Next() {
-		var payrollRecord entity.PayrollRecordListModel
-		err = rows.Scan(&payrollRecord.Payroll_id, &payrollRecord.Name, &payrollRecord.Payment_period, &payrollRecord.Payment_date, &payrollRecord.Status_name)
+		var payrollRecord model.PayrollRecordListModel
+
+		err = rows.Scan(
+			&payrollRecord.Payroll_id,
+			&payrollRecord.Name,
+			&payrollRecord.Payment_period,
+			&payrollRecord.Payment_date,
+			&payrollRecord.Status_name,
+		)
+
 		if err != nil {
-			log.Printf("Cannot retrieve data: %v", err)
+			utils.LogError("Repo", "GetPayrollRecordList scan data", err)
+			return payrollRecordList, err
 		}
 		payrollRecordList = append(payrollRecordList, payrollRecord)
 	}
 
 	if len(payrollRecordList) == 0 {
-		log.Println("| " + errors.New("sql: no data found").Error())
 		err := errors.New("sql: no data found")
+		utils.LogError("Repo", "GetPayrollRecordList", err)
 		return payrollRecordList, err
 	}
+
+	utils.CloseDB(rows)
+
 	return payrollRecordList, err
 }
 
-func (db *payrollRecordRepo) GetPayrollRecordDetail(id int) (entity.PayrollRecordDetailModel, error) {
-	var payrollRecord entity.PayrollRecordDetailModel
+func (db *payrollRecordRepo) GetPayrollRecordDetail(ctx context.Context, id uuid.UUID) (model.PayrollRecordDetailModel, error) {
+	var (
+		payrollRecord model.PayrollRecordDetailModel
+	)
 
 	// err := db.connection.QueryRow("SELECT * FROM payroll_records WHERE employee_id = ? AND year = ?", id, year).Scan(&payrollRecord)
 	query := fmt.Sprintf(`
@@ -93,24 +111,27 @@ func (db *payrollRecordRepo) GetPayrollRecordDetail(id int) (entity.PayrollRecor
 		WHERE
 			p.payroll_id = %v;`, id)
 
-	rows := db.connection.QueryRow(query)
-
-	err := rows.Scan(&payrollRecord.Payroll_id, &payrollRecord.Name, &payrollRecord.Payment_period, &payrollRecord.Payment_date, &payrollRecord.Basic_salary, &payrollRecord.Bpjs, &payrollRecord.Tax, &payrollRecord.Total_salary, &payrollRecord.Status_name)
+	err := db.connection.QueryRowxContext(ctx, query).Scan(
+		&payrollRecord.Payroll_id,
+		&payrollRecord.Name,
+		&payrollRecord.Payment_period,
+		&payrollRecord.Payment_date,
+		&payrollRecord.Basic_salary,
+		&payrollRecord.Bpjs,
+		&payrollRecord.Tax,
+		&payrollRecord.Total_salary,
+		&payrollRecord.Status_name,
+	)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Println("| " + err.Error())
-			return payrollRecord, err
-		} else {
-			log.Println("| " + err.Error())
-			return payrollRecord, err
-		}
+		utils.LogError("Repo", "func GetPayrollRecordDetail", err)
+		return payrollRecord, err
 	}
 
 	return payrollRecord, err
 }
 
-// func (db *payrollRecordRepo) CreatePayrollRecord(p entity.PayrollRecord) (entity.PayrollRecord, error) {
+// func (db *payrollRecordRepo) CreatePayrollRecord(ctx context.Context, p model.PayrollRecord, tx *sqlx.Tx, tx *sqlx.Tx) (model.PayrollRecord, error) {
 // 	stmt, err := db.connection.Prepare(`
 // 		INSERT INTO payroll_records(
 // 			user_id, payment_period, payment_date, basic_salary, bpjs, tax, total_salary, status_id
@@ -128,8 +149,10 @@ func (db *payrollRecordRepo) GetPayrollRecordDetail(id int) (entity.PayrollRecor
 // 	return p, err
 // }
 
-func (db *payrollRecordRepo) CreatePayrollRecord(p entity.PayrollRecord) (int, error) {
-	var user_id int
+func (db *payrollRecordRepo) CreatePayrollRecord(ctx context.Context, tx *sqlx.Tx, p model.PayrollRecord) (uuid.UUID, error) {
+	var (
+		user_id uuid.UUID
+	)
 
 	query := `
 		INSERT INTO payroll_records(
@@ -138,17 +161,30 @@ func (db *payrollRecordRepo) CreatePayrollRecord(p entity.PayrollRecord) (int, e
 			$1, $2, $3, $4, $5, $6, $7, $8
 		) RETURNING payroll_id;`
 
-	err := db.connection.QueryRow(query, p.User_id, p.Payment_period, p.Payment_date, p.Basic_salary, p.Bpjs, p.Tax, p.Total_salary, p.Status_id).Scan(&user_id)
+	err := tx.QueryRowxContext(
+		ctx,
+		query,
+		p.User_id,
+		p.Payment_period,
+		p.Payment_date,
+		p.Basic_salary,
+		p.Bpjs,
+		p.Tax,
+		p.Total_salary,
+		p.Status_id,
+	).Scan(
+		&user_id,
+	)
 
 	if err != nil {
-		log.Println("| " + err.Error())
-		return 0, err
+		utils.LogError("Repo", "func CreatePayrollRecord", err)
+		return user_id, err
 	}
 
 	return user_id, err
 }
 
-// func (db *payrollRecordRepo) UpdatePayrollRecord(id int, p entity.PayrollRecord) (entity.PayrollRecord, error) {
+// func (db *payrollRecordRepo) UpdatePayrollRecord(ctx context.Context, id int, p model.PayrollRecord) (model.PayrollRecord, error) {
 // 	stmt, err := db.connection.Prepare(`
 // 		UPDATE payroll_records SET
 // 			user_id = $1, payment_period = $2, payment_date = $3, basic_salary = $4, bpjs = $5, tax = $6, total_salary = $7, status_id = $8
@@ -165,18 +201,32 @@ func (db *payrollRecordRepo) CreatePayrollRecord(p entity.PayrollRecord) (int, e
 // 	return p, err
 // }
 
-func (db *payrollRecordRepo) UpdatePayrollRecord(id int, p entity.PayrollRecord) (int, error) {
-	stmt, err := db.connection.Prepare(`
+func (db *payrollRecordRepo) UpdatePayrollRecord(ctx context.Context, tx *sqlx.Tx, id uuid.UUID, p model.PayrollRecord) (uuid.UUID, error) {
+	query := `
 		UPDATE payroll_records SET
 			user_id = $1, payment_period = $2, payment_date = $3, basic_salary = $4, bpjs = $5, tax = $6, total_salary = $7, status_id = $8
 		WHERE
-			payroll_id = $9;`)
+			payroll_id = $9;`
 
-	stmt.Exec(p.User_id, p.Payment_period, p.Payment_date, p.Basic_salary, p.Bpjs, p.Tax, p.Total_salary, p.Status_id, p.Payroll_id)
+	err := tx.QueryRowxContext(
+		ctx,
+		query,
+		p.User_id,
+		p.Payment_period,
+		p.Payment_date,
+		p.Basic_salary,
+		p.Bpjs,
+		p.Tax,
+		p.Total_salary,
+		p.Status_id,
+		p.Payroll_id,
+	).Scan(
+		&p.Payroll_id,
+	)
 
 	if err != nil {
-		log.Println("| " + err.Error())
-		return 0, err
+		utils.LogError("Repo", "func UpdateLeaveBalance", err)
+		return p.Payroll_id, err
 	}
 
 	return p.Payroll_id, err

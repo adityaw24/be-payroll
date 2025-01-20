@@ -1,75 +1,83 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
-	"github.com/dafiqarba/be-payroll/dto"
+	"github.com/dafiqarba/be-payroll/model"
 	"github.com/dafiqarba/be-payroll/services"
 	"github.com/dafiqarba/be-payroll/utils"
+	"github.com/gofiber/fiber/v2"
 )
 
 type AuthController interface {
 	//Read Operation
-	Login(response http.ResponseWriter, request *http.Request)
+	Login() fiber.Handler
 	//Create Operation
-	Register(response http.ResponseWriter, request *http.Request)
+	Register() fiber.Handler
 }
 
 type authController struct {
 	authServ services.AuthService
-	jwtServ services.JWTService
+	jwtServ  services.JWTService
 	userServ services.UserService
 }
 
 func NewAuthController(authServ services.AuthService, jwtServ services.JWTService, userServ services.UserService) AuthController {
 	return &authController{
 		authServ: authServ,
-		jwtServ: jwtServ,
+		jwtServ:  jwtServ,
 		userServ: userServ,
 	}
 }
 
-func (c *authController) Login(response http.ResponseWriter, request *http.Request) {
-	var userLogin dto.UserLogin
-	errDec := json.NewDecoder(request.Body).Decode(&userLogin)
+func (c *authController) Login() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
 
-	// Error handling
-	if errDec != nil {
-		response.WriteHeader(http.StatusBadRequest)
-		utils.BuildErrorResponse(response, http.StatusBadRequest, errDec.Error())
-		return
-	}
-	// Forwarding data to service
-	var userLoginData, err = c.authServ.VerifyCredentials(userLogin)
-	if err != nil {
-		errMsg := errors.New("incorrect email/password").Error()
-		utils.BuildErrorResponse(response, http.StatusUnauthorized, errMsg)
-		return
-	}
-	token := c.jwtServ.GenerateToken(strconv.Itoa(userLoginData.User_id))
-	userLoginData.Token = token
+		userLoginData := model.UserResponse{}
+		userLogin := model.UserLogin{}
+		err := ctx.BodyParser(&userLogin)
 
-	utils.BuildResponse(response, http.StatusOK, "success", userLoginData);
+		// Error handling
+		if err != nil {
+			utils.BuildErrorResponse(ctx, http.StatusBadRequest, err.Error())
+			return err
+		}
+
+		// Forwarding data to service
+		userLoginData, err = c.authServ.VerifyCredentials(ctx.Context(), userLogin)
+		if err != nil {
+			errMsg := errors.New("incorrect email/password").Error()
+			utils.BuildErrorResponse(ctx, http.StatusUnauthorized, errMsg)
+			return err
+		}
+		token := c.jwtServ.GenerateToken(userLoginData.User_id)
+		userLoginData.Token = token
+
+		utils.BuildResponse(ctx, http.StatusOK, "success", userLoginData)
+		return err
+	}
 }
 
-func (c *authController) Register(response http.ResponseWriter, request *http.Request) {
-	//Var that holds registered user data
-	var regUser dto.RegisterUser
-	//Retrieve data from JSON
-	errDec := json.NewDecoder(request.Body).Decode(&regUser)
-	if errDec != nil {
-		utils.BuildErrorResponse(response, http.StatusBadRequest, errDec.Error())
-		return
+func (c *authController) Register() fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		//Var that holds registered user data
+		var regUser model.RegisterUser
+		var createdUser string
+		//Retrieve data from JSON
+		err := ctx.BodyParser(&regUser)
+		if err != nil {
+			utils.BuildErrorResponse(ctx, http.StatusBadRequest, err.Error())
+			return err
+		}
+		//Forwarding data to user service
+		createdUser, err = c.userServ.CreateUser(ctx.Context(), regUser)
+		if err != nil {
+			errMsg := err.Error()
+			utils.BuildErrorResponse(ctx, http.StatusConflict, errMsg)
+			return err
+		}
+		utils.BuildResponse(ctx, http.StatusOK, "success", createdUser)
+		return err
 	}
-	//Forwarding data to user service
-	createdUser, err := c.userServ.CreateUser(regUser)
-	if err != nil {
-		errMsg := err.Error()
-		utils.BuildErrorResponse(response, http.StatusConflict, errMsg)
-		return
-	}
-	utils.BuildResponse(response, http.StatusOK, "success", createdUser);
 }

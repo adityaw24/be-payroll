@@ -2,19 +2,16 @@ package services
 
 import (
 	"errors"
-	"log"
-	"net/http"
-	"os"
-
-	// "strings"
 	"time"
 
+	"github.com/dafiqarba/be-payroll/utils"
 	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 )
 
 type JWTService interface {
-	GenerateToken(userID string) string
-	ValidateToken(token string, r *http.Request) (*jwt.Token, error)
+	GenerateToken(userID uuid.UUID) string
+	ValidateToken(token string) (*jwt.Token, error)
 }
 
 type jwtCustomClaim struct {
@@ -26,43 +23,38 @@ type jwtService struct {
 	secretKey string
 }
 
-func NewJWTService() JWTService {
+func NewJWTService(secretKey string) JWTService {
 	return &jwtService{
-		secretKey: getSecretKey(),
+		secretKey: secretKey,
 	}
 }
 
-func getSecretKey() string {
-	secretKey := os.Getenv("JWT_SECRET")
-	return secretKey
-}
-
-func (j *jwtService) GenerateToken(userID string) string {
+func (j *jwtService) GenerateToken(userID uuid.UUID) string {
 	claims := &jwtCustomClaim{
-		userID,
+		userID.String(),
 		jwt.StandardClaims{
 			ExpiresAt: time.Now().Add(time.Minute * 15).Unix(),
-			Issuer:    userID,
+			Issuer:    userID.String(),
 			IssuedAt:  time.Now().Unix(),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signedTokenAsString, err := token.SignedString([]byte(j.secretKey))
+	signemodelkenAsString, err := token.SignedString([]byte(j.secretKey))
 	if err != nil {
 		panic(err)
 	}
-	return signedTokenAsString
+	return signemodelkenAsString
 }
 
-func (j *jwtService) ValidateToken(tokenString string, r *http.Request) (*jwt.Token, error) {
-	token, err := jwt.Parse(tokenString, func(parsedToken *jwt.Token) (interface{}, error) {
-		if method, ok := parsedToken.Method.(*jwt.SigningMethodHMAC); !ok {
+func (j *jwtService) ValidateToken(tokenString string) (*jwt.Token, error) {
+	token, err := jwt.Parse(tokenString, func(parsemodelken *jwt.Token) (interface{}, error) {
+		if method, ok := parsemodelken.Method.(*jwt.SigningMethodHMAC); !ok {
 			err := errors.New("invalid signature method")
-			log.Println("| err: ", err)
-			return nil, err 
+			utils.LogError("Services", "ValidateToken", err)
+			return nil, err
 		} else if method != jwt.SigningMethodHS256 {
 			err := errors.New("invalid signature method")
-			log.Println("| err: ", err)
+			utils.LogError("Services", "ValidateToken", err)
 			return nil, err
 		} else {
 			return []byte(j.secretKey), nil
@@ -70,8 +62,9 @@ func (j *jwtService) ValidateToken(tokenString string, r *http.Request) (*jwt.To
 	})
 	//Parsing Token Error Handling
 	if err != nil {
-		log.Println("| error: ", err)
-		return nil, errors.New("token invalid")
+		err := errors.New("token invalid")
+		utils.LogError("Services", "ValidateToken", err)
+		return nil, err
 	}
 	//Returns token
 	return token, nil
@@ -94,7 +87,7 @@ func (j *jwtService) ValidateToken(tokenString string, r *http.Request) (*jwt.To
 
 // type TokenDetail struct {
 // 	AccessToken  string
-// 	ExpiredToken int64
+// 	Expiremodelken int64
 // }
 
 // type AccessDetail struct {
@@ -104,12 +97,12 @@ func (j *jwtService) ValidateToken(tokenString string, r *http.Request) (*jwt.To
 
 // func CreateToken(userId int) (*TokenDetail, error) {
 // 	td := &TokenDetail{}
-// 	td.ExpiredToken = time.Now().Add(time.Minute*15).Unix()
+// 	td.Expiremodelken = time.Now().Add(time.Minute*15).Unix()
 // 	var err error
 // 	atClaims := jwt.MapClaims{}
 // 	atClaims["authorized"] = true
 // 	atClaims["user_id"] = userId
-// 	atClaims["exp"] = td.ExpiredToken
+// 	atClaims["exp"] = td.Expiremodelken
 
 // 	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
 // 	td.AccessToken, err := at.SignedString([]byte(viper.GetString("Jwt.Secret")))

@@ -11,3 +11,36 @@
 2022/02/18 13:14:58 listen tcp 0.0.0.0:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
 2022/02/18 13:17:09 | Server listening on port: 8000
 2022/02/18 13:17:09 listen tcp 0.0.0.0:8000: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+[15-Jan-2025 16:16:06] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:16:06] 404 - 127.0.0.1 GET /favicon.ico
+[15-Jan-2025 16:16:42] 200 - 127.0.0.1 GET /
+[15-Jan-2025 16:17:38] 200 - 127.0.0.1 GET /
+[15-Jan-2025 16:17:49] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:17:53] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:18:53] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:19:14] 200 - 127.0.0.1 GET /
+[15-Jan-2025 16:19:24] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:19:48] 200 - 127.0.0.1 GET /
+[15-Jan-2025 16:19:51] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:23:56] 404 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:25:03] 200 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:34:32] 200 - 127.0.0.1 GET /v1
+[15-Jan-2025 16:34:38] 404 - 127.0.0.1 GET /v1/user-list
+[15-Jan-2025 16:36:35] 404 - 127.0.0.1 GET /v1/user-list Cannot GET /v1/user-list
+[15-Jan-2025 16:46:38] 404 - 127.0.0.1 GET /v1/user-list => Cannot GET /v1/user-list
+[15-Jan-2025 16:47:18] 404 - 127.0.0.1 GET /v1 => Cannot GET /v1
+[15-Jan-2025 16:54:35] 200 - 127.0.0.1 GET /v1 => -
+[20-Jan-2025 15:48:26] 500 - 127.0.0.1 POST /v1/role => pq: duplicate key value violates unique constraint "roles_name_key"
+[20-Jan-2025 15:49:13] 200 - 127.0.0.1 POST /v1/role => -
+[20-Jan-2025 15:53:21] 200 - 127.0.0.1 POST /v1/role => -
+[20-Jan-2025 15:54:54] 500 - 127.0.0.1 POST /v1/role => pq: duplicate key value violates unique constraint "roles_name_key"
+[20-Jan-2025 15:55:01] 500 - 127.0.0.1 POST /v1/role => pq: canceling statement due to user request
+[20-Jan-2025 15:55:45] 500 - 127.0.0.1 POST /v1/role => pq: canceling statement due to user request
+[20-Jan-2025 16:00:25] 500 - 127.0.0.1 POST /v1/role => pq: canceling statement due to user request
+[20-Jan-2025 16:01:09] 200 - 127.0.0.1 POST /v1/position => -
+[20-Jan-2025 16:01:18] 200 - 127.0.0.1 POST /v1/position => -
+[20-Jan-2025 16:07:26] 200 - 127.0.0.1 POST /v1/position => -
+[20-Jan-2025 16:07:43] 200 - 127.0.0.1 POST /v1/position => -
+[20-Jan-2025 16:07:59] 200 - 127.0.0.1 POST /v1/role => -
+[20-Jan-2025 16:08:47] 500 - 127.0.0.1 POST /v1/register => pq: value too long for type character varying(50)
+[20-Jan-2025 16:17:01] 200 - 127.0.0.1 POST /v1/register => -
